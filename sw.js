@@ -2,7 +2,7 @@
    アプリ本体をキャッシュしてオフラインでも起動できるようにする。
    ※スクショの読み取り（AI）はオンライン時のみ。KIF読み込み・保存はオフラインでも動作。 */
 
-const CACHE = "kifu-maker-v1";
+const CACHE = "kifu-maker-v2";
 const ASSETS = [
   "./",
   "./index.html",

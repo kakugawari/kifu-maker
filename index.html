@@ -176,6 +176,9 @@
     font-size:15pt;font-weight:700;
     letter-spacing:1em;text-indent:1em;margin-bottom:2.5mm;
   }
+  .kdo-title h3.long{
+    font-size:13.5pt;letter-spacing:.25em;text-indent:.25em;
+  }
   .kdo-title .tline{
     width:22mm;height:0;margin:0 auto;
     border-top:0.8px solid #6B6A62;
@@ -203,7 +206,7 @@
   .col{flex:1;min-width:0;padding:0 4mm;}
   .col.has + .col.has{border-left:0.5px solid #D8D4C6;}
   .mv{
-    display:flex;font-size:11pt;line-height:1.38;
+    display:flex;font-size:var(--mv,11.5pt);line-height:1.5;
     border-bottom:0.5px dotted #C9C4B4;
     white-space:nowrap;
   }
@@ -268,6 +271,7 @@
   <section class="panel" id="editPanel" hidden>
     <h2><b>二</b>読み取り結果を直す</h2>
     <div class="fields">
+      <div style="grid-column:1/-1"><label for="fTitle">大会名・タイトル（空欄なら「棋譜」と表示）</label><input id="fTitle" placeholder="例：第３回 かくがわり杯"></div>
       <div><label for="fSente">先手</label><input id="fSente" placeholder="先手の名前"></div>
       <div><label for="fGote">後手</label><input id="fGote" placeholder="後手の名前"></div>
       <div><label for="fDate">対局日</label><input id="fDate" placeholder="2026年7月3日"></div>
@@ -300,7 +304,7 @@
 
   /* ---------- 状態（すべてメモリ上） ---------- */
   var images = [];          // {b64, mediaType, url}
-  var game = { sente:"", gote:"", date:"", result:"", moves:[] };
+  var game = { sente:"", gote:"", date:"", result:"", title:"", moves:[] };
 
   var $ = function(id){ return document.getElementById(id); };
   var dropZone=$("dropZone"), fileInput=$("fileInput"), thumbs=$("thumbs"),
@@ -390,7 +394,9 @@
       if(!g.moves.length){ throw new Error("指し手が見つかりません。KIF形式の棋譜ファイルか確認してください"); }
       game.sente=g.sente; game.gote=g.gote;
       game.date=g.date;   game.result=g.result;
+      game.title=g.title||game.title;
       game.moves=g.moves;
+      $("fTitle").value=game.title;
       $("fSente").value=game.sente; $("fGote").value=game.gote;
       $("fDate").value=game.date;   $("fResult").value=game.result;
       movesBox.value=game.moves.join("\n");
@@ -405,7 +411,7 @@
   }
 
   function parseKif(text){
-    var g={sente:"",gote:"",date:"",result:"",moves:[]};
+    var g={sente:"",gote:"",date:"",result:"",title:"",moves:[]};
     var terminals=["投了","中断","千日手","詰み","持将棋","切れ負け","反則勝ち","反則負け","入玉宣言"];
     var lines=text.split(/\r?\n/);
     for(var i=0;i<lines.length;i++){
@@ -414,6 +420,7 @@
       if(/^[#＃*＊]/.test(line.trim())) continue;      // コメント行
       if(/^変化：/.test(line.trim())) break;            // 変化以降は本譜でないため無視
       var m;
+      if((m=line.match(/^棋戦：(.*)$/)))            { g.title=m[1].trim(); continue; }
       if((m=line.match(/^先手：(.*)$/)))            { g.sente=m[1].trim(); continue; }
       if((m=line.match(/^後手：(.*)$/)))            { g.gote =m[1].trim(); continue; }
       if((m=line.match(/^(?:開始日時|対局日)：(.*)$/))){ if(!g.date) g.date=m[1].trim(); continue; }
@@ -485,6 +492,7 @@
       game.result = parsed.result || "";
       game.moves  = Array.isArray(parsed.moves) ? parsed.moves.filter(Boolean) : [];
 
+      $("fTitle").value=game.title;
       $("fSente").value=game.sente; $("fGote").value=game.gote;
       $("fDate").value=game.date;   $("fResult").value=game.result;
       movesBox.value = game.moves.join("\n");
@@ -506,8 +514,9 @@
   }
 
   /* ---------- 編集 → 反映 ---------- */
-  ["fSente","fGote","fDate","fResult"].forEach(function(id){
+  ["fTitle","fSente","fGote","fDate","fResult"].forEach(function(id){
     $(id).addEventListener("input", function(){
+      game.title=$("fTitle").value;
       game.sente=$("fSente").value; game.gote=$("fGote").value;
       game.date=$("fDate").value;   game.result=$("fResult").value;
       renderSheets();
@@ -520,8 +529,7 @@
     renderSheets();
   });
 
-  /* ---------- A4組版（隠しステージに描画） ---------- */
-  var COLS=4, ROWS=40; // 1ページ 4列×40行 = 160手
+  /* ---------- A4組版（隠しステージに描画・必ず1枚に収める） ---------- */
 
   function esc(s){
     return String(s).replace(/[&<>"']/g,function(c){
@@ -541,49 +549,47 @@
       setNote("","");
       return;
     }
-    var perPage=COLS*ROWS;
-    var pages=[];
-    for(var p=0;p*perPage<game.moves.length;p++){
-      pages.push(game.moves.slice(p*perPage,(p+1)*perPage));
+    var m=game.moves.length;
+    // 基本：30行×4列(120手)。121手以上は5列目を追加。
+    // それでも収まらない長手数は行数を増やし、文字を自動で縮めて必ず1枚に収める。
+    var cols = (m<=120) ? 4 : 5;
+    var rows = Math.max(30, Math.ceil(m/cols));
+    var scale = Math.min(1, 30/rows);
+    var fs = Math.max(7.5, 11.5*scale);   // 指し手の文字サイズ(pt)
+
+    var colsHtml="";
+    for(var c=0;c<cols;c++){
+      var cell="";
+      for(var r0=0;r0<rows;r0++){
+        var idx=c*rows+r0;
+        if(idx>=m) break;
+        var n=idx+1;
+        var isSente=(n%2===1);
+        var mark=isSente?"▲":"△";
+        cell+='<div class="mv"><span class="no">'+n+'</span><span class="te '+
+              (isSente?"sen":"go")+'">'+mark+esc(game.moves[idx])+'</span></div>';
+      }
+      colsHtml+='<div class="col'+(cell?' has':'')+'">'+cell+'</div>';
     }
-    var html="";
-    pages.forEach(function(pageMoves,pi){
-      var colsHtml="";
-      for(var c=0;c<COLS;c++){
-        var cell="";
-        for(var r0=0;r0<ROWS;r0++){
-          var idx=c*ROWS+r0;
-          if(idx>=pageMoves.length) break;
-          var n=pi*perPage+idx+1;
-          var isSente=(n%2===1);
-          var mark=isSente?"▲":"△";
-          cell+='<div class="mv"><span class="no">'+n+'</span><span class="te '+
-                (isSente?"sen":"go")+'">'+mark+esc(pageMoves[idx])+'</span></div>';
-        }
-        colsHtml+='<div class="col'+(cell?' has':'')+'">'+cell+'</div>';
-      }
-      var head;
-      if(pi===0){
-        var sub=[];
-        if(game.date)  sub.push('<span>'+esc(game.date)+'</span>');
-        if(game.result)sub.push('<span>'+esc(game.result)+'</span>');
-        head='<div class="kdo-title"><h3>棋譜</h3><div class="tline"></div></div>'+
-          '<div class="players">'+
-            '<span class="p"><em>先手</em>'+esc(game.sente||"　　　　")+'</span>'+
-            '<span class="vs">▲△</span>'+
-            '<span class="p"><em>後手</em>'+esc(game.gote ||"　　　　")+'</span>'+
-          '</div>'+
-          (sub.length?'<div class="subinfo">'+sub.join('<span>|</span>')+'</div>':'<div style="margin-bottom:5mm"></div>');
-      }else{
-        head='<div class="kdo-title"><h3>棋譜</h3><div class="tline"></div></div>'+
-          '<div class="subinfo" style="margin-top:2mm">（つづき）</div>';
-      }
-      html+='<div class="sheet"><div class="frame">'+head+
-            '<div class="cols">'+colsHtml+'</div></div>'+
-            '<span class="pageno">'+(pi+1)+' ／ '+pages.length+'</span>'+
-            LOGO+'</div>';
-    });
-    renderStage.innerHTML=html;
+
+    var sub=[];
+    if(game.date)  sub.push('<span>'+esc(game.date)+'</span>');
+    if(game.result)sub.push('<span>'+esc(game.result)+'</span>');
+    var titleText=(game.title||"").trim();
+    var isLong=titleText.length>6;
+    var head='<div class="kdo-title"><h3 class="'+(isLong?'long':'')+'">'+
+          esc(titleText||"棋譜")+'</h3><div class="tline"></div></div>'+
+      '<div class="players">'+
+        '<span class="p"><em>先手</em>'+esc(game.sente||"　　　　")+'</span>'+
+        '<span class="vs">▲△</span>'+
+        '<span class="p"><em>後手</em>'+esc(game.gote ||"　　　　")+'</span>'+
+      '</div>'+
+      (sub.length?'<div class="subinfo">'+sub.join('<span>|</span>')+'</div>':'<div style="margin-bottom:5mm"></div>');
+
+    renderStage.innerHTML=
+      '<div class="sheet" style="--mv:'+fs.toFixed(2)+'pt"><div class="frame">'+head+
+      '<div class="cols">'+colsHtml+'</div></div>'+
+      LOGO+'</div>';
     scheduleCapture();
   }
 
